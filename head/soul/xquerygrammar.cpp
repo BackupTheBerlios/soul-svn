@@ -32,11 +32,11 @@
 
 #include "xquerygrammar.h"
 
-ARule strlit(const std::string &s) {
-    return ARule(s);
+Rule strlit(const std::string &s) {
+    return Rule(s);
 }
-ARule ch_p(char c) {
-    return ARule(c);
+Rule ch_p(char c) {
+    return Rule(c);
 }
 
 /** Skip spaces and comments in XQuery
@@ -51,7 +51,7 @@ XQuerySkip::XQuerySkip() {
     NO_DEBUG_NODE(CommentContents) =  *((anychar_p - ':') | (':' >> (anychar_p - ')')));
 }
 
-const ARule &XQuerySkip::start() const {
+const Rule &XQuerySkip::start() const {
     return Skip;
 }
 
@@ -137,7 +137,7 @@ XQueryGrammar::XQueryGrammar()
     DEBUG_NODE(ExprSingle) =  FLWORExpr | QuantifiedExpr | TypeswitchExpr | IfExpr | OrExpr;
 
     // [30]     FLWORExpr      ::=      (ForClause | LetClause)+ WhereClause? OrderByClause? "return" ExprSingle
-    DEBUG_NODE(FLWORExpr) =  +(ForClause | LetClause) >> !WhereClause >> !OrderByClause >> (t_return^ARule("return")) >> ExprSingle;
+    DEBUG_NODE(FLWORExpr) =  +(ForClause | LetClause) >> !WhereClause >> !OrderByClause >> (t_return^Rule("return")) >> ExprSingle;
 
     // [31]     ForClause      ::=      <"for" "$"> VarName TypeDeclaration? PositionalVar? "in" ExprSingle (", " "$" VarName TypeDeclaration? PositionalVar? "in" ExprSingle)*
     DEBUG_NODE(ForClause) = (t_for^keyword("for"))  >> "$" >> VarName >> !TypeDeclaration >> !PositionalVar >> "in" >> ExprSingle >> *(strlit(",") >> "$" >> VarName >> !TypeDeclaration >> !PositionalVar >> "in" >> ExprSingle);
@@ -294,8 +294,8 @@ XQueryGrammar::XQueryGrammar()
     // [76]     Predicate      ::=      "[" Expr "]"
     DEBUG_NODE(Predicate) = ch_p('[') >> Expr >> ']';
 
-    // [77]     PrimaryExpr       ::=      Literal | VarRef | ParenthesizedExpr | ContextItemExpr | FunctionCall | Constructor | OrderedExpr | UnorderedExpr
-    DEBUG_NODE(PrimaryExpr) =      Literal | VarRef | ParenthesizedExpr | ContextItemExpr | FunctionCall | Constructor | OrderedExpr | UnorderedExpr;
+    // [77]     PrimaryExpr       ::=      Literal | VarRef | ParenthesizedExpr | ParserContextItemExpr | FunctionCall | Constructor | OrderedExpr | UnorderedExpr
+    DEBUG_NODE(PrimaryExpr) =      Literal | VarRef | ParenthesizedExpr | ParserContextItemExpr | FunctionCall | Constructor | OrderedExpr | UnorderedExpr;
 
     // [78]     Literal     ::=      NumericLiteral | StringLiteral
     DEBUG_NODE(Literal)     =      NumericLiteral | StringLiteral;
@@ -309,8 +309,8 @@ XQueryGrammar::XQueryGrammar()
     // [81]     ParenthesizedExpr       ::=      "(" Expr? ")"
     ParenthesizedExpr = strlit("(") >> !Expr >> ")";
 
-    // [82]     ContextItemExpr      ::=      "."
-    ContextItemExpr = strlit(".");
+    // [82]     ParserContextItemExpr      ::=      "."
+    ParserContextItemExpr = strlit(".");
 
     // [83]     OrderedExpr       ::=      <"ordered" "{"> Expr "}"
 
@@ -453,12 +453,12 @@ XQueryGrammar::XQueryGrammar()
     // [148]       MUExtension       ::=      "(::" S? "extension" S QName (S ExtensionContents)? "::)"   /* ws: explicit */
     // [149]       ExtensionContents       ::=      (Char* - (Char* '::)' Char*))
 
-    
+
     // [152]       QName       ::=      [http://www.w3.org/TR/REC-xml-names/#NT-QName]Names   /* gn: xml-version */
     //      = [6]   QName     ::=  (Prefix ':')? LocalPart
     //      = [7]   Prefix   ::=   NCName
     //      = [8]   LocalPart   ::=   NCName
-    QName = NCName >> !(':' >> NCName) >> t_QName[true_p]++;
+    QName = NCName >> !(':' >> NCName) >> t_QName()++;
 
     // [153]       NCName      ::=      [http://www.w3.org/TR/REC-xml-names/#NT-NCName]Names  /* gn: xml-version */
     // [4]   NCName    ::=  (Letter | '_') (NCNameChar)*   /*   An XML Name,  minus the ":" */
@@ -479,16 +479,44 @@ XQueryGrammar::XQueryGrammar()
 }
 
 
-const ARule &XQueryGrammar::start() const {
+const Rule &XQueryGrammar::start() const {
     return  Module;
 }
 
 
 
+// ------------------------------------ AST walker ----------------------------
+
+
+struct _XQuery : public SemanticContext {
+   std::string s;
+   static void g(_XQuery &_c, _XQuery &a) {
+      _c.s = a.s;
+       std::cerr << "Now, s is \"" << _c.s << "\"\n";
+    }
+    
+    static void print(_XQuery &q) { std::cerr << "Coucou '" << q.s << "'" << std::endl; }
+    static void new_s(_XQuery &a, Token::Information &b) {
+       std::cerr << "new token: " << b.text << std::endl;
+       a.s = b.text;
+    }
+}
+;
+
+
 XQueryWalker::XQueryWalker() {
-   DEBUG_NODE(XQuery) = tree_p[t_NCName];
+    //    GrammarRule<A> QName;
+    GrammarRule QName;
+
+
+    QName = &cconstructor<_XQuery> 
+          << tree_p(Rule(t_NCName)[&_XQuery::new_s]);
+
+    DEBUG_NODE(XQuery) = &cconstructor<_XQuery>
+          << (tree_p(t_QName,*(QName[&_XQuery::g])) << &_XQuery::print);
+
 }
 
-const ARule &XQueryWalker::start() const {
-   return  XQuery;
+const Rule &XQueryWalker::start() const {
+    return  XQuery;
 }

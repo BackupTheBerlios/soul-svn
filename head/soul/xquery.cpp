@@ -35,6 +35,7 @@ int main(int argc, char *argv[])
    }
    string str = argv[1];
    
+   try {
    XQueryGrammar grammar;
    XQuerySkip skipper;
    
@@ -53,10 +54,14 @@ int main(int argc, char *argv[])
    scanner.context.print_parse_tree(cout, scanner);
    
    cout << "--------- Generating the query\n";
+   scanner.context.current.prepare();
    ASTScanner ast_scanner(scanner.context.current);
    XQueryWalker walker;
    b = walker.parse(ast_scanner);
-   if (b && ast_scanner.at_end()) cout << "OK\n"; else cout << "Error\n";
+   if (b && ast_scanner.at_end()) { 
+      cout << "OK\n"; 
+      ast_scanner.context.execute_actions();
+   } else cout << "Error\n";
    
    
    } else {
@@ -71,4 +76,10 @@ int main(int argc, char *argv[])
       cout << "\n-------------------------\n";
    }
    return EXIT_SUCCESS;
+   } 
+   
+   catch(const std::exception &e) { std::cerr << "Caught exception: " << e.what() << std::endl; }
+   catch(...) {  std::cerr << "Caught unknown exception" << std::endl; }
+   
+   return EXIT_FAILURE;
 }

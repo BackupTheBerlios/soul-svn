@@ -18,19 +18,17 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <sstream>
 #include <cstdlib> 
 #include "parser.h"
 
 namespace Soul {
 
-struct UnaryOperator : public Rule {
-    const ARule rule;
-    UnaryOperator(const ARule &_rule) : rule(_rule) {}
-};
+UnaryOperator::UnaryOperator(const Rule &_rule) : rule(_rule) {}
 
 class Positive : public UnaryOperator {
    public:
-      Positive(const ARule &_rule) : UnaryOperator(_rule) {}
+      Positive(const Rule &_rule) : UnaryOperator(_rule) {}
        bool match(Scanner &s) const {
        if (!(rule.parse(s))) return false;
        Scanner::Iterator last = s.get_pos();
@@ -42,7 +40,7 @@ class Positive : public UnaryOperator {
 
 class KleeneStar : public UnaryOperator {
 public:
-    KleeneStar(const ARule &_rule) : UnaryOperator(_rule) {}
+    KleeneStar(const Rule &_rule) : UnaryOperator(_rule) {}
     bool match(Scanner &s) const {
        Scanner::Iterator last = s.get_pos();
        while (rule.parse(s)) last = s.get_pos();
@@ -53,7 +51,7 @@ public:
 
 class Optional : public UnaryOperator {
 public:
-    Optional(const ARule &_rule) : UnaryOperator(_rule) {}
+    Optional(const Rule &_rule) : UnaryOperator(_rule) {}
     bool match(Scanner &s) const {
        Scanner::Iterator last = s.get_pos();
        if (!rule.parse(s)) s.move(last);
@@ -63,7 +61,7 @@ public:
 
 class Not : public UnaryOperator {
    public:
-      Not(const ARule &_rule) : UnaryOperator(_rule) {}
+      Not(const Rule &_rule) : UnaryOperator(_rule) {}
       bool match(Scanner &s) const {
          return !rule.parse(s);
       }
@@ -71,17 +69,17 @@ class Not : public UnaryOperator {
 
 
 
-struct BinaryOperator : public Rule {
-   const ARule left;
-   const ARule right;
-   BinaryOperator(const ARule &l, const ARule &r) : left(l), right(r) {}
+struct BinaryOperator : public RuleImpl {
+   const Rule left;
+   const Rule right;
+   BinaryOperator(const Rule &l, const Rule &r) : left(l), right(r) {}
 };
 
 
 struct Alternative : public BinaryOperator {
    /** Return the longest alternative?*/
    enum { normal, longest, shortest } mode;
-   Alternative(const ARule &l, const ARule &r) : BinaryOperator(l,r), mode(normal) {}
+   Alternative(const Rule &l, const Rule &r) : BinaryOperator(l,r), mode(normal) {}
    
    bool match(Scanner &s) const {
       switch(mode) { 
@@ -119,14 +117,14 @@ struct Alternative : public BinaryOperator {
 };
 
 struct Sequence : public BinaryOperator {
-   Sequence(const ARule &l, const ARule &r) : BinaryOperator(l,r) {}
+   Sequence(const Rule &l, const Rule &r) : BinaryOperator(l,r) {}
    bool match(Scanner &s) const {
       return left.parse(s) && right.parse(s);
    }
 };
 
 struct ButNode : public BinaryOperator {
-   ButNode(const ARule &l, const ARule &r) : BinaryOperator(l,r) {}
+   ButNode(const Rule &l, const Rule &r) : BinaryOperator(l,r) {}
    bool match(Scanner &s) const {
       Scanner::Iterator start = s.get_pos();
       if (!left.parse(s)) return false;
@@ -138,11 +136,11 @@ struct ButNode : public BinaryOperator {
    }
 };
 
-ARule ARule::operator!() {
-    return ARule((Rule*)new Optional(*this));
+Rule Rule::operator!() {
+   return Rule((RuleImpl*)new Optional(*this));
 }
 
-struct Literal : public Rule {
+struct Literal : public RuleImpl {
    std::string value;
    Literal(const std::string &s) : value(s) {/* std::cerr << "[CREATING LITERAL " << s << "]\n";*/ }
    Literal(char c) : value(1,c) { /*std::cerr << "[CREATING LITERAL " << c << "]\n";*/  }
@@ -164,44 +162,60 @@ struct Literal : public Rule {
    }
 };
 
-/**
- * Match a token
- */
-struct Token_p : public Rule {
+
+
+// ---*--- Token parser ---*---
+
+Token::Information::Information(const Token &_token, const std::string &_content) : token(_token), text(_content) {}
+
+struct Token_p : public RuleImpl, public SemanticFunction {
    const Token &token;
    Token_p(const Token &_token) : token(_token) {}
+   
    bool match(Scanner &s) const {
-      return s.get_token() == token;
+      Token::Information info = s.get_token();
+      bool r = (info.token == token);
+      if (r) s.context.add_action(*this, new Token::Information(token, info.text));
+      return r;
    }
+   
+   virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+      stack.push(c);
+   }
+   
+   virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+      stack.pop();
+   }
+
 };
 
 // ------------------------------------ Predefined parsers ---
 
-struct Digit : public Rule {
+struct Digit : public RuleImpl {
    bool match(Scanner &s) const {
       return !s.at_end() && isdigit(s.get_char());
    }
 };
 
-struct XDigit : public Rule {
+struct XDigit : public RuleImpl {
    bool match(Scanner &s) const {
       return !s.at_end() && isxdigit(s.get_char());
    }
 };
 
-struct Alpha : public Rule {
+struct Alpha : public RuleImpl {
    bool match(Scanner &s) const {
       return !s.at_end() && isalpha(s.get_char());
    }
 };
 
-struct Space : public Rule {
+struct Space : public RuleImpl {
    bool match(Scanner &s) const {
       return !s.at_end() && isspace(s.get_char());
    }
 };
 
-struct Anychar : public Rule {
+struct Anychar : public RuleImpl {
    bool match(Scanner &s) const {
       if (s.at_end()) return false;
       s.get_char();
@@ -209,26 +223,26 @@ struct Anychar : public Rule {
    }
 };
 
-struct True_p : public Rule{
+struct True_p : public RuleImpl{
    bool match(Scanner &s) const {
       return true;
    }
 };
 
 
-ARule digit(new Digit());
-ARule digit_p(new Digit());
-ARule xdigit_p(new XDigit());
-ARule alpha_p(new Alpha());
-ARule space_p(new Space());
-ARule anychar_p(new Anychar());
-ARule true_p(new True_p());
+Rule digit(new Digit());
+Rule digit_p(new Digit());
+Rule xdigit_p(new XDigit());
+Rule alpha_p(new Alpha());
+Rule space_p(new Space());
+Rule anychar_p(new Anychar());
+Rule true_p(new True_p());
 
 // ------------------------------------ Parser modifiers ---
 
 struct _Epsilon_p : public UnaryOperator {
    public:
-      _Epsilon_p(const ARule &_rule) : UnaryOperator(_rule) {}
+      _Epsilon_p(const Rule &_rule) : UnaryOperator(_rule) {}
       bool match(Scanner &s) const {
          Scanner::Iterator start = s.get_pos();
          bool b = rule.parse(s);
@@ -237,45 +251,45 @@ struct _Epsilon_p : public UnaryOperator {
       }
 };
 
-ARule Epsilon_p::operator()(const ARule &x) {
-      return ARule(new _Epsilon_p(x));
+Rule Epsilon_p::operator()(const Rule &x) {
+   return Rule(new _Epsilon_p(x));
 }
 
 Epsilon_p epsilon_p;
 
-// ------------------------------------ ARule ---
+// ------------------------------------ Rule ---
 
-ARule ARule::operator-(const ARule &x) { return ARule(new ButNode(*this,x));}
+Rule Rule::operator-(const Rule &x) { return Rule(new ButNode(*this,x));}
 
-ARule ARule::operator|(const ARule &x) { return ARule(new Alternative(*this, x)); }
-ARule ARule::operator+() { return ARule(new Positive(*this)); }
-ARule ARule::operator>>(const ARule &x) { return ARule(new Sequence(*this,x)); }
-ARule ARule::operator*() { return ARule(new KleeneStar(*this)); }
-ARule ARule::operator~() { return ARule(new Not(*this)); }
+Rule Rule::operator|(const Rule &x) { return Rule(new Alternative(*this, x)); }
+Rule Rule::operator+() { return Rule(new Positive(*this)); }
+Rule Rule::operator>>(const Rule &x) { return Rule(new Sequence(*this,x)); }
+Rule Rule::operator*() { return Rule(new KleeneStar(*this)); }
+Rule Rule::operator~() { return Rule(new Not(*this)); }
 
 
-ARule::~ARule() { }
-ARule::ARule() {}
-ARule::ARule(const ARule &_other) : rule(_other.rule) {}
-ARule::ARule(Rule *_rule) : rule(_rule) {}
+Rule::~Rule() { }
+Rule::Rule() {}
+Rule::Rule(const Rule &_other) : rule(_other.rule) {}
+Rule::Rule(RuleImpl *_rule) : rule(_rule) {}
 
-ARule::ARule(const Token &_token) : rule(new Token_p(_token)) {}
-ARule::ARule(const char *s) : rule(new Literal(s)) {}
-ARule::ARule(const std::string &s) : rule(new Literal(s)) {}
-ARule::ARule(char c) : rule(new Literal(c)) {}
+Rule::Rule(const Token &_token) : rule(new Token_p(_token)) {}
+Rule::Rule(const char *s) : rule(new Literal(s)) {}
+Rule::Rule(const std::string &s) : rule(new Literal(s)) {}
+Rule::Rule(char c) : rule(new Literal(c)) {}
 
-Rule *ARule::operator->() { return rule.get(); }
-const Rule *ARule::operator->() const { return rule.get(); }
+RuleImpl *Rule::operator->() { return rule.get(); }
+const RuleImpl *Rule::operator->() const { return rule.get(); }
 
-ARule operator>>(char c, const ARule &x) {
-   return ARule(new Sequence(ARule(new Literal(c)),x));
+Rule operator>>(char c, const Rule &x) {
+   return Rule(new Sequence(Rule(new Literal(c)),x));
 }
 
-ARule operator>>(const std::string &s, const ARule &x) {
-   return ARule(new Sequence(ARule(new Literal(s)),x));
+Rule operator>>(const std::string &s, const Rule &x) {
+   return Rule(new Sequence(Rule(new Literal(s)),x));
 }
 
-bool ARule::parse(Scanner &s) const {
+bool Rule::parse(Scanner &s) const {
    if (rule.isValid()) {
       Scanner::Iterator start = s.get_pos();
       bool generate = s.context.do_generate_AST(false);
@@ -287,19 +301,119 @@ bool ARule::parse(Scanner &s) const {
    return false;
 }
 
-ARule &ARule::operator=(const ARule &other) {
+Rule &Rule::operator=(const Rule &other) {
    rule = other.rule;
    return *this;
 }
 
 
+// -*- Semantic action
+
+
+ParserContext::ActionTree::Node::Node(const SemanticFunction &r) : rule(r) {
+}
+       
+SmartPointer<ParserContext::ActionTree::Node> ParserContext::add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c) {
+   if (!is_generating_action_tree()) return 0;
+   
+   SmartPointer<ParserContext::ActionTree::Node> node = new ActionTree::Node(r);
+   node->context = c;
+         
+   if (action_tree.last.isValid()) {
+         assert(!action_tree.last->next.isValid());
+         action_tree.last->next = node;
+         action_tree.last = action_tree.last->next;
+   } else {
+         assert(!action_tree.root.isValid());
+         action_tree.last = node;
+         action_tree.root = action_tree.last;
+   }
+   return node;
+}
+
+void ParserContext::add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c, const ActionTree &t) {
+   if (!is_generating_action_tree()) return;
+   ActionTree v = remove_action_tree();
+   action_tree = t;
+   SmartPointer<ParserContext::ActionTree::Node>  node = add_action(r,c);
+   node->context = c;
+   node->first_child = v.root;
+}
+
+
+ParserContext::ActionTree ParserContext::remove_action_tree() {
+   if (!is_generating_action_tree()) return ParserContext::ActionTree();
+   ActionTree t = action_tree;
+   action_tree  = ActionTree();
+   return t;
+}
+
+void ParserContext::restore_action_tree(const ActionTree &t) { 
+   if (!is_generating_action_tree()) return;
+   action_tree = t; 
+}
+
+void ParserContext::execute_actions() {
+   if (action_tree.root.isValid()) {
+      SemanticContext::Stack stack;
+      action_tree.root->execute(stack);
+   }
+}
+       
+void ParserContext::ActionTree::Node::execute(SemanticContext::Stack &stack) {
+//    std::cerr << std::string(tttt++,' ')  << "Executing action " << &rule << ", " << typeid(rule).name() << std::endl;
+   rule.execute(stack, context);
+   if (first_child.isValid()) first_child->execute(stack);
+   rule.cleanup(stack, context);
+   if (next.isValid()) next->execute(stack);
+}
+
+SemanticContext::~SemanticContext() {}
+SmartPointer<SemanticContext> SemanticContext::Stack::get_last() { return last; }
+SmartPointer<SemanticContext> SemanticContext::Stack::pop() { 
+   last =  top();
+   SemanticContextStack::pop(); 
+   return last; 
+}
+
+struct SemanticContextConstructionRule : public UnaryOperator, public SemanticFunction {
+   SemanticContext::Constructor constructor;
+   SemanticContextConstructionRule(const Rule &_rule, SemanticContext::Constructor c) : UnaryOperator(_rule), constructor(c) {}
+   bool match(Scanner &s) const {
+      ParserContext::ActionTree t = s.context.remove_action_tree();
+      bool r = rule.parse(s);
+      if (r) 
+         s.context.add_action(*this, 0, t);
+      else
+         s.context.restore_action_tree(t);
+      
+      return r;
+   }
+   virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+      stack.push(constructor());
+   }
+   virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+      stack.pop();
+   }
+};
+Rule operator<<(SemanticContext::Constructor c, const Rule &r) {
+   return Rule(new SemanticContextConstructionRule(r,c));
+}
+
+
+
+
+
+
+
+
 // ------------------------------------ GrammarRule ---
 
-AST::Node::Node(const Token &_token) : token(_token) {
+AST::Node::Node(const Token &_token) : token(_token), parent(0) {
 }
 
 namespace {
-   void tabulate(Context &c) {
+   void tabulate(ParserContext &c) {
       std::cerr << std::string(c.level,' ');
    };
 };
@@ -310,7 +424,7 @@ std::string RuleContainer::get_name() const {
 
 
 bool RuleContainer::match(Scanner &s) const {   
-   Context &c = s.context;
+   Soul::ParserContext &c = s.context;
    uint on = c.operation_number + 1;
    if (debug) {
       c.level++;
@@ -356,13 +470,13 @@ void RuleContainer::set_name(const std::string &s) {
    name = s;
 }
 
-GrammarRule::GrammarRule() : ARule(new RuleContainer) {}
+GrammarRule::GrammarRule() : Rule(new RuleContainer) {}
 
-ARule &GrammarRule::operator=(const ARule &other) {
+Rule &GrammarRule::operator=(const Rule &other) {
    dynamic_cast<RuleContainer&>(*rule).rule = other.rule;
    return *this;
 }
-ARule &GrammarRule::operator=(const GrammarRule &other) {
+Rule &GrammarRule::operator=(const GrammarRule &other) {
    dynamic_cast<RuleContainer&>(*rule).rule = other.rule;
    return *this;
 }
@@ -375,23 +489,25 @@ void GrammarRule::set_debug(bool b) {
    dynamic_cast<RuleContainer&>(*rule).set_debug(b);
 }
 
-// ------------------------------------ Rule ---
+// ------------------------------------ RuleImpl ---
 
-std::string Rule::get_name() const { return "[anonymous]"; }
-Rule::Rule() {}
-Rule::~Rule() {}
+std::string RuleImpl::get_name() const { return "[anonymous]"; }
+RuleImpl::RuleImpl() {}
+RuleImpl::~RuleImpl() {}
 
-bool Rule::match(Scanner &s) const { return false; }
+bool RuleImpl::match(Scanner &s) const { return false; }
+
 
 /** Parse */
-bool Rule::parse(Scanner &s) const {
+bool RuleImpl::parse(Scanner &s) const {
 /*   std::cerr << std::string(c.level+1,' ') << " " << typeid(*this).name() << " ";
    s.print_context(std::cerr);
    std::cerr << std::endl;*/
+   
    return match(s);
 };
 
-
+SemanticFunction::~SemanticFunction() {}
 
 // ------------------------------------ Grammar ---
 
@@ -413,7 +529,7 @@ bool Scanner::do_skip() const {
 }
 
 
-void Scanner::set_skipper(const ARule &rule) {
+void Scanner::set_skipper(const Rule &rule) {
    skipper = rule;
 }
 
@@ -435,15 +551,24 @@ wchar_t Scanner::get_wchar() {
    throw std::logic_error("This parser is not a stream of wchar");
 }
     
-const Token &Scanner::get_token() {
+const Token::Information Scanner::get_token() {
    throw std::logic_error("This parser is not a stream of tokens");
 }
 
 // ------------------------------------ AST Scanner ---
 
-ARule ASTMatch::operator[](const ARule &r) {
-   return ASTScanner::tree_start >> r >> ASTScanner::tree_end;
+Rule ASTMatch::operator()(const Token &t, const Rule &r) {
+   return ASTScanner::tree_start >> t >> r >> ASTScanner::tree_end;
 }
+
+Rule ASTMatch::operator()(const Token &t) {
+   return (ASTScanner::tree_start >> t >> ASTScanner::tree_end) | t;
+}
+
+Rule ASTMatch::operator()(const Rule &r) {
+   return (ASTScanner::tree_start >> r >> ASTScanner::tree_end);
+}
+
 ASTMatch tree_p;
 
 struct ASTScanner::Iterator : public ScannerIteratorImpl {
@@ -524,21 +649,21 @@ void ASTScanner::print_context(std::ostream &out, Scanner::Iterator begin, Scann
       out  << i.get_token().get_name() << " ";
 }
 
-const Token &ASTScanner::get_token() {
+const Token::Information ASTScanner::get_token() {
    if (at_end()) throw std::runtime_error("End of stream");
-   const Token &token = position.get_token();
+   const Token::Information information(position.get_token(), position.node ? position.node->content : "");
    position = get_next(position);
-   return token;
+   return information;
 }
 
 
 // ------------------------------------ Directive ---
 
-ARule Directive::operator[](const ARule &x) { return x; }
+Rule Directive::operator[](const Rule &x) { return x; }
 Directive root_node_d;
 
 struct _Lexeme_d : public UnaryOperator {
-   _Lexeme_d(const ARule &_rule) : UnaryOperator(_rule) {}
+   _Lexeme_d(const Rule &_rule) : UnaryOperator(_rule) {}
    bool match(Scanner &s) const {
       bool old_skip = s.set_do_skip(false);
       bool b = rule.parse(s);
@@ -547,15 +672,15 @@ struct _Lexeme_d : public UnaryOperator {
    }
 };
 
-ARule Lexeme_d::operator[](const ARule &x) {
-   return ARule(new _Lexeme_d(x)); 
+Rule Lexeme_d::operator[](const Rule &x) {
+   return Rule(new _Lexeme_d(x)); 
 }
 Lexeme_d lexeme_d;
 
 // -*- phrase_d
 
 struct _Phrase_d : public UnaryOperator {
-   _Phrase_d(const ARule &_rule) : UnaryOperator(_rule) {}
+   _Phrase_d(const Rule &_rule) : UnaryOperator(_rule) {}
    bool match(Scanner &s) const {
       bool old_skip = s.set_do_skip(true);
       bool b = rule.parse(s);
@@ -564,8 +689,8 @@ struct _Phrase_d : public UnaryOperator {
    }
 };
 
-ARule Phrase_d::operator[](const ARule &x) {
-   return ARule(new _Phrase_d(x)); 
+Rule Phrase_d::operator[](const Rule &x) {
+   return Rule(new _Phrase_d(x)); 
 }
 Phrase_d phrase_d;
 
@@ -573,7 +698,7 @@ Phrase_d phrase_d;
 // -*- phrase_d
 
 namespace {
-   void longest_d_r(const ARule &x) {
+   void longest_d_r(const Rule &x) {
       if (Alternative *a = dynamic_cast<Alternative*>(x.rule.get())) {
          a->mode = Alternative::longest;
          longest_d_r(a->left);
@@ -582,28 +707,34 @@ namespace {
    }
 }
 
-ARule Longest_d::operator[](const ARule &x) {
+Rule Longest_d::operator[](const Rule &x) {
    longest_d_r(x);
    return x;
 }
 Longest_d longest_d;
 
 
-// ------------------------------------ Context ---
+// ------------------------------------ ParserContext ---
 
 AST::AST() : is_root(false) {}
+void AST::prepare() const {
+   root->set_parent(0);
+}
+void AST::Node::set_parent(const Node *p) const {
+   parent = p;
+   if (next.isValid()) next->set_parent(p);
+   if (first_child.isValid()) first_child->set_parent(this);
+}
 
-Context::Context() : generate_AST(false), level(0), operation_number(0)  {}
+ParserContext::ParserContext() : generate_AST(false), generate_action_tree(true), level(0), operation_number(0)  {}
 
-void Context::print_parse_tree(std::ostream &out, const Scanner &s) {   
+void ParserContext::print_parse_tree(std::ostream &out, const Scanner &s) {   
    print_parse_tree(out, s, level, current.root);
 }
 
-void Context::print_parse_tree(std::ostream &out, const Scanner &s, uint level, const SmartPointer<AST::Node> &t) {
+void ParserContext::print_parse_tree(std::ostream &out, const Scanner &s, uint level, const SmartPointer<AST::Node> &t) {
    if (!t.isValid()) { out << "EMPTY!\n"; return; }
-   out << std::string(level, ' ') << "[" << t->token.get_name() <<  "] ";
-   s.print_context(out, t->start,t->end);
-   out << std::endl;
+   out << std::string(level, ' ') << "[" << t->token.get_name() << "," << t.get()<<  "] " << t->content <<  std::endl;
    if (t->first_child.isValid()) print_parse_tree(out, s, level+1, t->first_child);
    if (t->next.isValid()) print_parse_tree(out, s, level, t->next);
 }
@@ -612,8 +743,8 @@ void Context::print_parse_tree(std::ostream &out, const Scanner &s, uint level, 
 // ------------------------------------ Is a ---
 
 struct Is_a_p : public UnaryOperator {
-   ARule is_a_rule;
-   Is_a_p(const ARule &_mrule, const ARule &_rule) : UnaryOperator(_rule), is_a_rule(_mrule) {}
+   Rule is_a_rule;
+   Is_a_p(const Rule &_mrule, const Rule &_rule) : UnaryOperator(_rule), is_a_rule(_mrule) {}
    bool match(Scanner &s) const {
       // Try to match the "is a"
       Scanner::Iterator start = s.get_pos();
@@ -628,9 +759,9 @@ struct Is_a_p : public UnaryOperator {
    }
 };
 
-Is_a::Is_a(const ARule &_rule) : rule(_rule) {}
-ARule Is_a::operator()(const ARule &x) {
-   return ARule(new Is_a_p(rule,x));
+Is_a::Is_a(const Rule &_rule) : rule(_rule) {}
+Rule Is_a::operator()(const Rule &x) {
+   return Rule(new Is_a_p(rule,x));
 }
 
 
@@ -640,11 +771,11 @@ ARule Is_a::operator()(const ARule &x) {
 
 namespace {
    // Add a node to the AST tree
-   void construct_tree(const ScannerIterator &begin, const ScannerIterator &end, const AST &saved_tree, Context &c, const Token &r, bool root_node) {
+   void construct_tree(const std::string &content, const AST &saved_tree, ParserContext &c, const Token &r, bool root_node) {
       // Build ourselves
       SmartPointer<AST::Node> selftree = new AST::Node(r);
-      selftree->start = begin;
-      selftree->end = end;
+      selftree->content = content;
+      
       if (root_node) {
          selftree->add_as_last_child(saved_tree.root);
          c.current.root = selftree;
@@ -666,7 +797,7 @@ namespace {
 /** Makes a node become the root in an AST tree */
 class MakeRoot: public UnaryOperator {
    public:
-      MakeRoot(const ARule &_rule) : UnaryOperator(_rule) {}
+      MakeRoot(const Rule &_rule) : UnaryOperator(_rule) {}
       bool match(Scanner &s) const {
          if (!s.context.is_generating_AST()) return rule.parse(s);
             AST saved_tree = s.context.current; 
@@ -678,20 +809,20 @@ class MakeRoot: public UnaryOperator {
                   throw std::logic_error("Trying to make a non-token the root of an AST tree");
                AST ast = s.context.current;
                s.context.current = AST();
-               construct_tree(ast.root->start, ast.root->end, saved_tree, s.context, ast.root->token, true);
+               construct_tree(ast.root->content, saved_tree, s.context, ast.root->token, true);
             } else s.context.current = saved_tree;
          return r;
       }
 };
-ARule ARule::operator++(int) { return ARule(new MakeRoot(*this)); }
+Rule Rule::operator++(int) { return Rule(new MakeRoot(*this)); }
 
 
 struct _Token : public UnaryOperator {
    const Token &token;
-   ARule is_a_rule;
+   Rule is_a_rule;
    bool root_node;
    
-   _Token(const Token &_token, const ARule &_rule, bool _root_node) : UnaryOperator(_rule), token(_token), root_node(_root_node) {}
+   _Token(const Token &_token, const Rule &_rule, bool _root_node) : UnaryOperator(_rule), token(_token), root_node(_root_node) {}
    bool match(Scanner &s) const {
       if (!s.context.is_generating_AST()) return rule.parse(s);
       
@@ -703,7 +834,8 @@ struct _Token : public UnaryOperator {
       Scanner::Iterator end = s.get_pos();
       
       s.context.do_generate_AST(b);
-      if (r) construct_tree(begin, end, saved_tree, s.context, token, root_node);
+      std::ostringstream out;s.print_context(out,begin,end);
+      if (r) construct_tree(std::string(out.str()), saved_tree, s.context, token, root_node);
       else s.context.current = saved_tree;
       return r;
    }
@@ -711,13 +843,19 @@ struct _Token : public UnaryOperator {
 
 Token::Token(const std::string &_name) : name(_name) {}
 Token::~Token() {}
-
-std::string Token::get_name() const { return name; }
-ARule Token::operator[](const ARule &x) const {
-   return ARule(new _Token(*this, x, false));
+Rule Token::operator()() const { 
+   return Rule(new _Token(*this, true_p, false));
 }
-ARule Token::operator^(const ARule &x) const {
-   return ARule(new _Token(*this, x, true));
+
+std::string Token::get_name() const { 
+   return name;
+}
+
+Rule Token::operator[](const Rule &x) const {
+   return Rule(new _Token(*this, x, false));
+}
+Rule Token::operator^(const Rule &x) const {
+   return Rule(new _Token(*this, x, true));
 }
 
 }
