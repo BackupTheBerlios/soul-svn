@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <typeinfo>
 
-namespace Soul {
 
 /** This template class defines a smart pointer
    * This pointer delete the object whenever no class use the object.
@@ -277,7 +276,6 @@ public:
     }
 
 };
-}
 
 #endif
 
