@@ -1,6 +1,3 @@
-bin_PROGRAMS = xquery
-xquery_SOURCES = xquery.cpp parser.cpp xquerygrammar.cpp
-
 # set the include path found by configure
 INCLUDES= $(all_includes)
 
