@@ -38,98 +38,111 @@ class Rule;
 class Token;
 class ParserContext;
 
+/** An AST tree */
 struct AST {
     void print(std::ostream &, bool dot_format);
     void print(std::ostream &, bool dot_format, uint level);
-    
+
     SmartPointer<AST> next, first_child;
-        const Token &token;
-        std::string content;
-        mutable AST *parent;
-        
-        /** Node state: root node, active root node or normal */
-        enum { NORMAL = 1, ROOT = 2, ACTIVE=4 } state;
-        
-        inline bool is_root() const { return state & (ROOT | ACTIVE); }
-        inline bool is_active() const { return state & ACTIVE; }
+    const Token &token;
+    std::string content;
+    mutable AST *parent;
 
-        AST(const Token&);
+    /** Node state: root node, active root node or normal */
+    enum { NORMAL = 1, ROOT = 2, ACTIVE=4 } state;
 
-        void set_parent(AST*) const;
-        
-        /**
-         * Replace this AST node with another one
-         * @param x 
-         */
-        inline void replace(SmartPointer<AST> &x) {
-            AST *i = x.get();
-            while (i->next) { i->parent = parent; i = i->next.get(); }
+    inline bool is_root() const {
+        return state & (ROOT | ACTIVE);
+    }
+    inline bool is_active() const {
+        return state & ACTIVE;
+    }
+
+    AST(const Token&);
+
+    void set_parent(AST*) const;
+
+    /**
+     * Replace this AST node with another one
+     * @param x 
+     */
+    inline void replace(SmartPointer<AST> &x) {
+        AST *i = x.get();
+        while (i->next) {
             i->parent = parent;
-            i->next = next;
-            if (parent) {
-                i = parent->first_child.get();
-                if (i == this) parent->first_child = x;
-                else { 
-                    while (i != 0 && i->next.get() != this) i = i->next.get();
-                    assert(i!=0); // should not be the case
-                    i->next = x;
-                }
-            }
+            i = i->next.get();
         }
-        
-        inline void add_as_last_child(const SmartPointer<AST> &x) {
-            if (!x)
-                return;
-            if (!first_child)
-                first_child = x;
+        i->parent = parent;
+        i->next = next;
+        if (parent) {
+            i = parent->first_child.get();
+            if (i == this)
+                parent->first_child = x;
             else {
-                AST * i = first_child.get();
-                while (i->next)
+                while (i != 0 && i->next.get() != this)
                     i = i->next.get();
+                assert(i!=0); // should not be the case
                 i->next = x;
             }
-            x->set_parent(this);
         }
-        
-        inline void add_as_first_child(const SmartPointer<AST> &x) {
-            if (!x)
-                return;
-            AST * i = x.get();
-            i->set_parent(this);
-            while (i->next) {
-                i = i->next.get();
-                i->set_parent(this);
-            }
-            i->next = first_child;
-            first_child = x;
-        }
+    }
 
-        inline void add_as_last_sibling(const SmartPointer<AST> &x) {
-            if (!x)
-                return;
-            AST * i = this;
+    inline void add_as_last_child(const SmartPointer<AST> &x) {
+        if (!x)
+            return;
+        if (!first_child)
+            first_child = x;
+        else {
+            AST * i = first_child.get();
             while (i->next)
                 i = i->next.get();
             i->next = x;
-            x->parent = parent;
         }
+        x->set_parent(this);
+    }
 
-    };
-    
-    struct ScannerIteratorImpl {
-        virtual ~ScannerIteratorImpl();
-        virtual long operator-(const ScannerIteratorImpl &) = 0;
-    };
+    inline void add_as_first_child(const SmartPointer<AST> &x) {
+        if (!x)
+            return;
+        AST * i = x.get();
+        i->set_parent(this);
+        while (i->next) {
+            i = i->next.get();
+            i->set_parent(this);
+        }
+        i->next = first_child;
+        first_child = x;
+    }
 
-    typedef SmartPointer<ScannerIteratorImpl> ScannerIterator;
+    inline void add_as_last_sibling(const SmartPointer<AST> &x) {
+        if (!x)
+            return;
+        AST * i = this;
+        while (i->next)
+            i = i->next.get();
+        i->next = x;
+        x->parent = parent;
+    }
 
-    
+};
+
+struct ScannerIteratorImpl {
+    virtual ~ScannerIteratorImpl();
+    virtual long operator-(const ScannerIteratorImpl &) = 0;
+};
+
+typedef SmartPointer<ScannerIteratorImpl> ScannerIterator;
+
+
+/** What is returned by a rule after a parse */
 struct ParseResult {
     bool hit;
-    
-    inline operator bool() const { return hit; }
+
+    inline operator bool() const {
+        return hit;
+    }
     inline ParseResult(bool _hit = false) : hit(_hit) {}
-    
+
     /**
      * Add a new result at the end of this one (AST, ...)
      * @param r 
@@ -140,25 +153,53 @@ struct ParseResult {
 
 /**
  * Rule semantic context
+ * The semantic contexts can be created by rules and can be accessed by subrules and the last ancestor 
+ * rule that created a context
  */
 struct SemanticContext {
-   virtual ~SemanticContext();
-   
-   /**
-    * Called when the context is closed (but before it is destroyed)
-    */
-   virtual void finish();
-   
-   typedef void (*Function)(SemanticContext&);
-   typedef SemanticContext * (*Constructor)();
+    typedef SmartPointer<SemanticContext> Ptr;
+    virtual ~SemanticContext();
 
-   typedef std::stack<SmartPointer<SemanticContext> > SemanticContextStack;
-   class Stack : public  SemanticContextStack {
-      SmartPointer<SemanticContext> last;
-      public:
-         SmartPointer<SemanticContext> get_last();
-         SmartPointer<SemanticContext> pop();
-   };
+    /**
+     * Called when the context is closed (but before it is destroyed)
+     */
+    virtual void finish();
+
+    typedef void (*Function)(SemanticContext&);
+    typedef SemanticContext * (*Constructor)();
+
+    typedef std::stack<SmartPointer<SemanticContext> > SemanticContextStack;
+    
+    class Stack : public  SemanticContextStack {
+        SmartPointer<SemanticContext> last;
+    public:
+        SmartPointer<SemanticContext> get_last();
+        SmartPointer<SemanticContext> pop();
+    };
+};
+
+/** 
+ * Global context for actions 
+ * An instance of this object is the only parameter given to actions
+ */
+class GlobalSemanticContext {
+    /** The current context stack */
+    SemanticContext::Stack stack;
+public:
+    virtual ~GlobalSemanticContext();
+    template <class T> T& current() {
+        if (stack.empty()) throw std::runtime_error("Stack of context is empty");
+        return dynamic_cast<T&>(*stack.top());
+    }
+    template <class T> T& last() {
+        if (stack.get_last()) return dynamic_cast<T&>(*stack.get_last());
+        throw std::runtime_error("There is no last context");
+    }
+    inline SmartPointer<SemanticContext>  get_last() { return stack.get_last(); }
+    inline SemanticContext::Stack &getStack() { return stack; }
+    
+    typedef void (*Function)(GlobalSemanticContext &);
+    
 };
 
 
@@ -166,15 +207,15 @@ struct SemanticContext {
 class Token {
 private:
     std::string name;
-    Token(const Token&);    
+    Token(const Token&);
 public:
-   
-   struct Information : public SemanticContext {
-      const Token &token;
-      std::string text;
-      Information(const Token &_token, const std::string &content);
-   };
-   
+
+struct Information : public SemanticContext {
+        const Token &token;
+        std::string text;
+        Information(const Token &_token, const std::string &content);
+    };
+
     Token(const std::string &_name);
     virtual ~Token();
     std::string get_name() const;
@@ -204,21 +245,27 @@ public:
     ParseResult parse(ParserContext &) const;
     virtual std::string get_name() const;
     void set_flatten(bool);
-    inline bool get_flatten() { return do_flatten; }
+    inline bool get_flatten() {
+        return do_flatten;
+    }
 };
 
+
+/** An action in an action tree */
 class SemanticFunction {
 public:
-   virtual ~SemanticFunction();
-   /** Execute a semantic function */
-   virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const = 0;
-   /** Execute a semantic function */
-   virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const = 0;
+    virtual ~SemanticFunction();
+    /** Execute a semantic function */
+    virtual void execute(GlobalSemanticContext &stack, const SemanticContext::Ptr &) const = 0;
+    /** Execute a semantic function */
+    virtual void cleanup(GlobalSemanticContext &stack) const = 0;
 };
 
 
-template <class T, class U> struct SemanticContextInterfaceRule;
-template <class T> struct ContextRule;
+template <class T, class U>
+struct SemanticContextInterfaceRule;
+template <class T>
+struct ContextRule;
 
 /**
  * A rule
@@ -231,7 +278,7 @@ public:
     Rule(const Rule &);
     explicit Rule(RuleImpl *);
     virtual ~Rule();
-    
+
 
     /** \name Automatic construction of elements */
     //@{
@@ -243,10 +290,12 @@ public:
     Rule(char);
     /** A token reckoniser */
     Rule(const Token &);
-    
+
     enum Way { WAY_IN, WAY_OUT, WAY_ERROR };
-    template <typename T> Rule(ParseResult  (*f)(Rule::Way, T &)) : rule(new ContextRule<T>(f)) {
-    }
+    template <typename T>
+    Rule(ParseResult  (*f)(Rule::Way, T &)) : rule(new ContextRule<T>(f)) {}
+    
+    Rule(GlobalSemanticContext::Function f);
     //@}
 
     Rule();
@@ -283,17 +332,22 @@ public:
     virtual Rule &operator=(const Rule &);
 
     /** Semantic operator */
-    template <class T, class U> Rule operator[](void (*f)(T &, U &)) {   
-      return Rule(new SemanticContextInterfaceRule<T,U>(*this,f));
+    template <class T, class U>
+    Rule operator[](void (*f)(T &, U &)) {
+        return Rule(new SemanticContextInterfaceRule<T,U>(*this,f));
     }
     
     /** Context operator */
-    template <class T> Rule operator[](ParseResult(*f)(Way, T &)) {   
+    Rule operator[](GlobalSemanticContext::Function);
+
+    /** Context operator */
+    template <class T>
+    Rule operator[](ParseResult(*f)(Way, T &)) {
         return Rule(new ContextRule<T>(*this,f));
     }
 
     ParseResult parse(ParserContext &) const;
-    
+
     /**
      * Modifies the generation of the AST tree
      * @param  b true if we want to "flatten" the generated AST tree
@@ -308,7 +362,7 @@ SemanticContext *cconstructor() {
     return new T();
 }
 /** Construct a new context */
-Rule operator<<(SemanticContext::Constructor c, const Rule &r);
+Rule operator>>(SemanticContext::Constructor c, const Rule &r);
 
 
 
@@ -328,7 +382,7 @@ public:
     void set_name(const std::string &s);
     virtual std::string get_name() const;
     void set_debug(bool);
-    
+
 };
 
 /**
@@ -368,13 +422,14 @@ extern Rule true_p;
 
 Rule operator>>(char, const Rule &);
 Rule operator>>(const std::string &, const Rule &);
+
 inline Rule operator>>(const Token &token, const Rule &r) {
     return Rule(token) >> r;
 }
 
 
 /** \name Directives */
-                  
+
 class Directive {
 public:
     Rule operator[](const Rule &);
@@ -386,8 +441,8 @@ struct no_node_d {
 };
 
 class Flatten_d {
-    public:
-        Rule operator[](const Rule &);
+public:
+    Rule operator[](const Rule &);
 };
 extern Flatten_d flatten_d;
 
@@ -424,13 +479,13 @@ class RuleThenElse : public Rule {
 public:
     RuleThenElse(const Rule &, const Rule &);
     Rule else_p(const Rule &);
-}; 
+};
 
 class RuleThen {
-   Rule condition;
+    Rule condition;
 public:
-   RuleThen(const Rule &_condition);
-   RuleThenElse operator[](const Rule &);
+    RuleThen(const Rule &_condition);
+    RuleThenElse operator[](const Rule &);
 };
 
 struct If_p {
@@ -465,57 +520,57 @@ public:
  * The scanner
  */
 class Scanner {
-    protected:
-        Rule skipper;
-        /** Are we using the skipping grammar before each new char? */
-        bool is_skipping;
-    public:
-        typedef ScannerIterator Iterator;
+protected:
+    Rule skipper;
+    /** Are we using the skipping grammar before each new char? */
+    bool is_skipping;
+public:
+    typedef ScannerIterator Iterator;
 
-        Scanner();
-        virtual ~Scanner();
+    Scanner();
+    virtual ~Scanner();
 
 
     /**
          * Test wether the stream is finished
          * @return a boolean which is true if it is the end of the stream
      */
-        virtual bool at_end() const = 0;
+    virtual bool at_end() const = 0;
 
-        /** Get a char and move forward */
-        virtual char get_char();
+    /** Get a char and move forward */
+    virtual char get_char();
 
-        /** Get a wide char and move forward */
-        virtual wchar_t get_wchar();
+    /** Get a wide char and move forward */
+    virtual wchar_t get_wchar();
 
-        /** Get a char and move forward */
-        virtual const Token::Information get_token();
+    /** Get a char and move forward */
+    virtual const Token::Information get_token();
 
-        /** Get the current position */
-        virtual Iterator get_pos() const = 0;
+    /** Get the current position */
+    virtual Iterator get_pos() const = 0;
 
-        /** Move to a previously saved position */
-        virtual void move(const Iterator &) = 0;
-
-
-        /** For debuging */
-        virtual void print_context(std::ostream &out, Scanner::Iterator begin, size_t number = 0) const = 0;
-        virtual void print_context(std::ostream &out, Scanner::Iterator begin, Scanner::Iterator end) const = 0;
+    /** Move to a previously saved position */
+    virtual void move(const Iterator &) = 0;
 
 
-        /** \name Skipping */
+    /** For debuging */
+    virtual void print_context(std::ostream &out, Scanner::Iterator begin, size_t number = 0) const = 0;
+    virtual void print_context(std::ostream &out, Scanner::Iterator begin, Scanner::Iterator end) const = 0;
+
+
+    /** \name Skipping */
     //@{
-                          /** Set the no skipping level */
-                          bool set_do_skip(bool);
+    /** Set the no skipping level */
+    bool set_do_skip(bool);
 
-                  /** Set the no skipping level */
-                  bool do_skip() const;
+    /** Set the no skipping level */
+    bool do_skip() const;
 
-                  /** Set skipper */
-                  void set_skipper(const Rule &_rule);
+    /** Set skipper */
+    void set_skipper(const Rule &_rule);
 
-                  /** Skip */
-                  void skip(ParserContext &);
+    /** Skip */
+    void skip(ParserContext &);
     //@}
 };
 
@@ -536,8 +591,10 @@ private:
 public:
     uint level;
     uint operation_number;
-    
-    inline Scanner &get_scanner() { return *scanner; }
+
+    inline Scanner &get_scanner() {
+        return *scanner;
+    }
 
     inline bool is_generating_AST() const {
         return generate_AST;
@@ -548,19 +605,19 @@ public:
         generate_AST = b;
         return c;
     }
-    
-    
+
+
     class ASTAction {
-        public:
-            class Context;
-            virtual ~ASTAction() = 0;
-            virtual void run(Context &) = 0;
-            virtual void print(std::ostream &out) const = 0;
+    public:
+        class Context;
+        virtual ~ASTAction() = 0;
+        virtual void run(Context &) = 0;
+        virtual void print(std::ostream &out) const = 0;
     };
-    
-    
+
+
     std::vector<ASTAction*> m_actions;
-    
+
     SmartPointer<AST> get_AST();
 
 
@@ -579,14 +636,14 @@ public:
             SmartPointer<SemanticContext> context;
             const SemanticFunction &rule;
             Node(const SemanticFunction &r);
-            void execute(SemanticContext::Stack &stack);
+            void execute(GlobalSemanticContext &context);
         };
         SmartPointer<Node> root, last;
     };
 
     ActionTree action_tree;
-    SmartPointer<SemanticContext> execute_actions();
-    
+    SmartPointer<SemanticContext> execute_actions(GlobalSemanticContext &);
+
     /**
      * Add an action associated with rule r
      * @param r the sematantic function
@@ -594,7 +651,7 @@ public:
      * @return a node
      */
     SmartPointer<ActionTree::Node> add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c);
-    
+
     /**
      * Add the action associated with rule r
      * The current tree becomes the child of rule r
@@ -603,7 +660,7 @@ public:
      * @param t 
      */
     void add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c, const ActionTree &t);
-    
+
     ActionTree remove_action_tree();
     void restore_action_tree(const ActionTree &);
 
@@ -741,59 +798,61 @@ public:
 
 
 struct UnaryOperator : public RuleImpl {
-   const Rule rule;
-   UnaryOperator(const Rule &_rule);
+    const Rule rule;
+    UnaryOperator(const Rule &_rule);
 };
 
 
-template <class T, class U> struct SemanticContextInterfaceRule : public UnaryOperator, public SemanticFunction {
-   
-   typedef void (*Function)(T &, U &);
-   Function function;
-   
-   SemanticContextInterfaceRule(const Rule &_rule, Function f) : UnaryOperator(_rule), function(f) {}
-   ParseResult match(ParserContext &s) const {
-      ParseResult  r = rule.parse(s);
-      if (r) {
-//          std::cerr << "Adding semantic interface action " << this << std::endl;
-         s.add_action(*this, 0);
-      }
-      return r;
-   }
-   
-   virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-       if (stack.empty() || !stack.get_last()) throw std::logic_error("Missing context"); 
-       try {
+template <class T, class U>
+struct SemanticContextInterfaceRule : public UnaryOperator, public SemanticFunction {
+
+    typedef void (*Function)(T &, U &);
+    Function function;
+
+    SemanticContextInterfaceRule(const Rule &_rule, Function f) : UnaryOperator(_rule), function(f) {}
+    ParseResult match(ParserContext &s) const {
+        ParseResult  r = rule.parse(s);
+        if (r) {
+            //          std::cerr << "Adding semantic interface action " << this << std::endl;
+            s.add_action(*this, 0);
+        }
+        return r;
+    }
+
+    virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+        if (stack.empty() || !stack.get_last())
+            throw std::logic_error("Missing context");
+        try {
             function(dynamic_cast<T&>(*stack.top()), dynamic_cast<U&>(*stack.get_last()));
-       } catch (const std::bad_cast &) {
-           if (dynamic_cast<T*>(stack.top().get()) == 0) 
-               std::cerr << "Bad cast: can't convert " << typeid(stack.top().get()).name() <<" to " << typeid(T*).name() << std::endl;
-           if (dynamic_cast<U*>(stack.get_last().get()) == 0) 
-               std::cerr << "Bad cast: can't convert " << typeid(stack.get_last().get()).name() <<" to " << typeid(U*).name() << std::endl;
-           throw;
-       }
-   }
-   virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-   }
-};
+        } catch (const std::bad_cast &) {
+            if (dynamic_cast<T*>(stack.top().get()) == 0)
+                std::cerr << "Bad cast: can't convert " << typeid(stack.top().get()).name() <<" to " << typeid(T*).name() << std::endl;
+            if (dynamic_cast<U*>(stack.get_last().get()) == 0)
+                std::cerr << "Bad cast: can't convert " << typeid(stack.get_last().get()).name() <<" to " << typeid(U*).name() << std::endl;
+            throw;
+        }
+    }
+virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {}
+}
+;
 
 template <class T>
 struct SemanticContextRule : public UnaryOperator, public SemanticFunction {
-   typedef void (*Function)(T &);
-   Function function;
-   
-   SemanticContextRule(const Rule &_rule, Function f) : UnaryOperator(_rule), function(f) {}
-   ParseResult match(ParserContext &s) const {
-      ParseResult r = rule.parse(s);
-      return r;
-   }
-   
-   virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-      function(dynamic_cast<T&>(*stack.top()));
-   }
-   virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-   }
-};
+    typedef void (*Function)(T &);
+    Function function;
+
+    SemanticContextRule(const Rule &_rule, Function f) : UnaryOperator(_rule), function(f) {}
+    ParseResult match(ParserContext &s) const {
+        ParseResult r = rule.parse(s);
+        return r;
+    }
+
+    virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
+        function(dynamic_cast<T&>(*stack.top()));
+    }
+    virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {}
+}
+;
 
 
 /**
@@ -802,8 +861,9 @@ struct SemanticContextRule : public UnaryOperator, public SemanticFunction {
  * @param (* f)( T & ) 
  * @return 
  */
-template<class T> Rule operator<<(const Rule &r, void (*f)(T &)) {
-   return Rule(new SemanticContextRule<T>(r,f));
+template<class T>
+Rule operator<<(const Rule &r, void (*f)(T &)) {
+    return Rule(new SemanticContextRule<T>(r,f));
 }
 
 
@@ -814,27 +874,29 @@ struct ContextRule : public RuleImpl {
     Rule rule;
     typedef ParseResult (*Function)(Rule::Way, T &);
     Function function;
-   
+
     ContextRule(const Rule &_rule, Function f) : rule(_rule), function(f) {}
     ContextRule(Function f) : function(f) {}
-            
+
     ParseResult match(ParserContext &s) const {
         try {
-            if (!rule.rule) 
+            if (!rule.rule)
                 return function(Rule::WAY_IN, dynamic_cast<T&>(s));
-            
+
             function(Rule::WAY_IN,dynamic_cast<T&>(s));
             ParseResult r = rule.parse(s);
-            if (r) function(Rule::WAY_OUT,dynamic_cast<T&>(s));
-            else function(Rule::WAY_ERROR,dynamic_cast<T&>(s));
-        return r;
+            if (r)
+                function(Rule::WAY_OUT,dynamic_cast<T&>(s));
+            else
+                function(Rule::WAY_ERROR,dynamic_cast<T&>(s));
+            return r;
         } catch(...) {
             std::cerr << "Error (type of s is " << typeid(s).name() << ")" << std::endl;
         }
     }
-   
+
 };
-        
+
 
 
 }

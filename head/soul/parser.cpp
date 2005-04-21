@@ -34,58 +34,74 @@ namespace Soul {
 ParserContext::ASTAction::~ASTAction() {}
 
 class ParserContext::ASTAction::Context {
-    public:
-        std::stack<SmartPointer<AST> > stack;
-        Context() { stack.push(0); }
+public:
+    std::stack<SmartPointer<AST> > stack;
+    Context() {
+        stack.push(0);
+    }
 };
 
 class AST_Push : public ParserContext::ASTAction {
-    public:
-        void run(ParserContext::ASTAction::Context &c) {
-            c.stack.push(0);
-        }
-        virtual void print(std::ostream &out) const { out << "Push"; }
+public:
+    void run(ParserContext::ASTAction::Context &c) {
+        c.stack.push(0);
+    }
+    virtual void print(std::ostream &out) const {
+        out << "Push";
+    }
 };
 class AST_Pop : public ParserContext::ASTAction {
     bool m_flatten;
-    public:
-        AST_Pop(bool flatten) : m_flatten(flatten) {}
-        void run(ParserContext::ASTAction::Context &c) {
-            SmartPointer<AST> top = c.stack.top();
-            c.stack.pop();
-            if (top) {
-                if (m_flatten && top->state == AST::ACTIVE) { top->state = AST::ROOT;  }
-                if (c.stack.top()) {
-                    if (top->is_active()) { 
-                        top->add_as_last_child(c.stack.top());
-                        c.stack.top() = top;
-                    } else if (c.stack.top()->is_active()) c.stack.top()->add_as_last_child(top);
-                    else c.stack.top()->add_as_last_sibling(top);
-                } else c.stack.top() = top;
+public:
+    AST_Pop(bool flatten) : m_flatten(flatten) {}
+    void run(ParserContext::ASTAction::Context &c) {
+        SmartPointer<AST> top = c.stack.top();
+        c.stack.pop();
+        if (top) {
+            if (m_flatten && top->state == AST::ACTIVE) {
+                top->state = AST::ROOT;
             }
+            if (c.stack.top()) {
+                if (top->is_active()) {
+                    top->add_as_last_child(c.stack.top());
+                    c.stack.top() = top;
+                } else if (c.stack.top()->is_active())
+                    c.stack.top()->add_as_last_child(top);
+                else
+                    c.stack.top()->add_as_last_sibling(top);
+            } else
+                c.stack.top() = top;
         }
-        virtual void print(std::ostream &out) const { out << "Pop" << (m_flatten ? " (flattening)" : " (no flattening)"); }
+    }
+    virtual void print(std::ostream &out) const {
+        out << "Pop" << (m_flatten ? " (flattening)" : " (no flattening)");
+    }
 };
 
 class AST_Add : public ParserContext::ASTAction {
-    public:
-        SmartPointer<AST> m_astNode;
-        AST_Add(const SmartPointer<AST> &x) : m_astNode(x) { 
+public:
+    SmartPointer<AST> m_astNode;
+    AST_Add(const SmartPointer<AST> &x) : m_astNode(x) {}
+    void run(ParserContext::ASTAction::Context &c) {
+        if (m_astNode) {
+            if (c.stack.top()) {
+                if (m_astNode->is_active()) {
+                    m_astNode->add_as_last_child(c.stack.top());
+                    c.stack.top() = m_astNode;
+                } else {
+                    if (c.stack.top()->is_active())
+                        c.stack.top()->add_as_last_child(m_astNode);
+                    else
+                        c.stack.top()->add_as_last_sibling(m_astNode);
+                }
+            } else
+                c.stack.top() = m_astNode;
         }
-        void run(ParserContext::ASTAction::Context &c) {
-            if (m_astNode) {
-                if (c.stack.top()) {
-                    if (m_astNode->is_active()) {
-                        m_astNode->add_as_last_child(c.stack.top());
-                        c.stack.top() = m_astNode;
-                    } else {
-                        if (c.stack.top()->is_active()) c.stack.top()->add_as_last_child(m_astNode);
-                        else c.stack.top()->add_as_last_sibling(m_astNode);
-                    }
-                } else c.stack.top() = m_astNode;
-            }
-        }
-        virtual void print(std::ostream &out) const { out << "Add node: "; m_astNode->print(out,false); }
+    }
+    virtual void print(std::ostream &out) const {
+        out << "Add node: ";
+        m_astNode->print(out,false);
+    }
 
 };
 
@@ -228,14 +244,14 @@ struct Alternative : public BinaryOperator {
 
 struct Sequence : public BinaryOperator {
     Sequence(const Rule &l, const Rule &r) : BinaryOperator(l,r) {}
-    ParseResult match(ParserContext &s) const {        
+    ParseResult match(ParserContext &s) const {
         ParseResult r1 = left.parse(s);
         if (!r1)
             return false;
         ParseResult r2 = right.parse(s);
         if (r2)
             return r1.update(r2);
-        
+
         return false;
     }
 };
@@ -295,18 +311,18 @@ struct Token_p : public RuleImpl, public SemanticFunction {
     ParseResult match(ParserContext &s) const {
         Token::Information info = s.get_scanner().get_token();
         bool r = (info.token == token);
-//         std::cerr << "COMPARING " <<  info.token.get_name() << " (" << &info.token << ") AND " << token.get_name() << " (" << &token << ") => " << r << std::endl;
+        //         std::cerr << "COMPARING " <<  info.token.get_name() << " (" << &info.token << ") AND " << token.get_name() << " (" << &token << ") => " << r << std::endl;
         if (r)
             s.add_action(*this, new Token::Information(token, info.text));
         return ParseResult(r);
     }
 
-    virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-        stack.push(c);
+    virtual void execute(GlobalSemanticContext &context, const SmartPointer<SemanticContext> &c) const {
+        context.getStack().push(c);
     }
 
-    virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-        stack.pop();
+    virtual void cleanup(GlobalSemanticContext &context) const {
+        context.getStack().pop();
     }
 
 };
@@ -389,11 +405,11 @@ Epsilon_p epsilon_p;
 
 struct _IfThenElse : public RuleImpl {
     const Rule m_condition, m_then, m_else;
-    _IfThenElse(const Rule &_condition, const Rule &_then) 
-        : m_condition(_condition), m_then(_then) {}
-    _IfThenElse(const Rule &_condition, const Rule &_then, const Rule &_else) 
-        : m_condition(_condition), m_then(_then), m_else(_else) {}
-    
+    _IfThenElse(const Rule &_condition, const Rule &_then)
+            : m_condition(_condition), m_then(_then) {}
+    _IfThenElse(const Rule &_condition, const Rule &_then, const Rule &_else)
+            : m_condition(_condition), m_then(_then), m_else(_else) {}
+
     ParseResult match(ParserContext &c) const {
         Scanner &s = c.get_scanner();
         Scanner::Iterator start = s.get_pos();
@@ -401,14 +417,16 @@ struct _IfThenElse : public RuleImpl {
         bool old_ast_flag = c.do_generate_AST(false);
         s.move(start);
         c.do_generate_AST(old_ast_flag);
-        if (b) return m_then.parse(c);
-        else if (m_else.rule) return m_else.parse(c);
+        if (b)
+            return m_then.parse(c);
+        else if (m_else.rule)
+            return m_else.parse(c);
         return true;
     }
 };
 
 RuleThenElse::RuleThenElse(const Rule &_condition, const Rule &_then) : Rule(new _IfThenElse(_condition, _then)) {}
-Rule RuleThenElse::else_p(const Rule &y) { 
+Rule RuleThenElse::else_p(const Rule &y) {
     SmartPointer<_IfThenElse> ite = rule; // throws an exception if not castable
     return Rule(new _IfThenElse(ite->m_condition, ite->m_then, ite->m_else));
 }
@@ -423,6 +441,34 @@ RuleThen If_p::operator()(const Rule &x) {
 }
 If_p if_p;
 
+
+// ------------------------------------ Context rule --------------------------
+
+struct _ContextRule : public RuleImpl, public SemanticFunction {
+    
+    GlobalSemanticContext::Function function;
+    Rule rule;
+    
+    _ContextRule(GlobalSemanticContext::Function f) : function(f) {}
+    _ContextRule(const Rule &_rule, GlobalSemanticContext::Function f) : rule(_rule), function(f) {}
+            
+    ParseResult match(ParserContext &s) const {
+        if (rule.rule) {
+            ParseResult r = rule.parse(s);
+            if (!r) return r;
+            s.add_action(*this,0);
+            return r;
+        }
+        s.add_action(*this, 0);
+        return true;
+    }
+    
+    virtual void execute(GlobalSemanticContext &gc, const SmartPointer<SemanticContext>& c) const {
+        function(gc);
+    }
+    virtual void cleanup(GlobalSemanticContext &gc) const {}
+
+};
 
 // ------------------------------------ Rule ---
 
@@ -460,6 +506,11 @@ Rule::Rule(const Token &_token) : rule(new Token_p(_token)) {}
 Rule::Rule(const char *s) : rule(new Literal(s)) {}
 Rule::Rule(const std::string &s) : rule(new Literal(s)) {}
 Rule::Rule(char c) : rule(new Literal(c)) {}
+Rule::Rule(GlobalSemanticContext::Function f) : rule(new _ContextRule(f)) {}
+
+Rule Rule::operator[](GlobalSemanticContext::Function f) {
+    return Rule(new _ContextRule(*this, f));
+}
 
 RuleImpl *Rule::operator->() {
     return rule.get();
@@ -483,12 +534,15 @@ ParseResult Rule::parse(ParserContext &s) const {
         bool generate = s.do_generate_AST(false);
         s.get_scanner().skip(s);
         s.do_generate_AST(generate);
-        
+
         size_t N = s.m_actions.size();
-        if (generate && rule->get_flatten()) s.m_actions.push_back(new AST_Push);
+        if (generate && rule->get_flatten())
+            s.m_actions.push_back(new AST_Push);
         ParseResult r = rule->parse(s);
-        if (r) { if (generate && rule->get_flatten()) s.m_actions.push_back(new AST_Pop(true)); }
-        else {
+        if (r) {
+            if (generate && rule->get_flatten())
+                s.m_actions.push_back(new AST_Pop(true));
+        } else {
             assert(s.m_actions.size() >= N);
             s.m_actions.erase(s.m_actions.begin() + N, s.m_actions.end());
         }
@@ -498,7 +552,8 @@ ParseResult Rule::parse(ParserContext &s) const {
     return false;
 }
 void Rule::set_flatten(bool b) {
-    if (rule) rule->set_flatten(b);
+    if (rule)
+        rule->set_flatten(b);
 }
 
 Rule &Rule::operator=(const Rule &other) {
@@ -513,7 +568,7 @@ Rule &Rule::operator=(const Rule &other) {
 
 
 // -- Parser context
-SmartPointer<AST> ParserContext::get_AST() { 
+SmartPointer<AST> ParserContext::get_AST() {
     if (!m_ast) {
 
         ASTAction::Context context;
@@ -525,12 +580,15 @@ SmartPointer<AST> ParserContext::get_AST() {
         assert(context.stack.size() == 1);
         m_ast = context.stack.top();
     }
-    return m_ast;    
+    return m_ast;
 }
 
 ParserContext::ActionTree::Node::Node(const SemanticFunction &r) : rule(r) {}
 ParserContext::~ParserContext() {
-    while (!m_actions.empty()) { delete m_actions.back(); m_actions.pop_back(); }
+    while (!m_actions.empty()) {
+        delete m_actions.back();
+        m_actions.pop_back();
+    }
 }
 
 SmartPointer<ParserContext::ActionTree::Node> ParserContext::add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c) {
@@ -577,24 +635,32 @@ void ParserContext::restore_action_tree(const ActionTree &t) {
     action_tree = t;
 }
 
-SmartPointer<SemanticContext> ParserContext::execute_actions() {
+SmartPointer<SemanticContext> ParserContext::execute_actions(GlobalSemanticContext &context) {
     if (action_tree.root) {
-        SemanticContext::Stack stack;
-        action_tree.root->execute(stack);
-        return stack.get_last();
+        action_tree.root->execute(context);
+        return context.get_last();
     }
     return 0;
 }
 
-void ParserContext::ActionTree::Node::execute(SemanticContext::Stack &stack) {
+void ParserContext::ActionTree::Node::execute(GlobalSemanticContext &gc) {
     //    std::cerr << std::string(tttt++,' ')  << "Executing action " << &rule << ", " << typeid(rule).name() << std::endl;
-    rule.execute(stack, context);
+    rule.execute(gc, context);
     if (first_child)
-        first_child->execute(stack);
-    rule.cleanup(stack, context);
+        first_child->execute(gc);
+    rule.cleanup(gc);
     if (next)
-        next->execute(stack);
+        next->execute(gc);
 }
+
+
+// ------------------------------------ Global semantic context ---------------
+
+GlobalSemanticContext::~GlobalSemanticContext() {}
+
+
+
+// ------------------------------------ Semantic context ----------------------
 
 SemanticContext::~SemanticContext() {}
 void SemanticContext::finish() {}
@@ -622,14 +688,14 @@ struct SemanticContextConstructionRule : public UnaryOperator, public SemanticFu
 
         return r;
     }
-    virtual void execute(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-        stack.push(constructor());
+    virtual void execute(GlobalSemanticContext &context, const SemanticContext::Ptr &) const {
+        context.getStack().push(constructor());
     }
-    virtual void cleanup(SemanticContext::Stack &stack, const SmartPointer<SemanticContext>& c) const {
-        stack.pop();
+    virtual void cleanup(GlobalSemanticContext &context) const {
+        context.getStack().pop();
     }
 };
-Rule operator<<(SemanticContext::Constructor c, const Rule &r) {
+Rule operator>>(SemanticContext::Constructor c, const Rule &r) {
     return Rule(new SemanticContextConstructionRule(r,c));
 }
 
@@ -654,9 +720,13 @@ void tabulate(ParserContext &c) {
 std::string RuleContainer::get_name() const {
     return name;
 }
-RuleContainer::RuleContainer() : debug(false) { set_flatten(true); }
+RuleContainer::RuleContainer() : debug(false) {
+    set_flatten(true);
+}
 RuleContainer::RuleContainer(const SmartPointer<RuleImpl> &_rule) :
-        debug(false), rule(_rule) { set_flatten(true); }
+debug(false), rule(_rule) {
+    set_flatten(true);
+}
 
 void RuleContainer::set_debug(bool b) {
     debug = b;
@@ -670,8 +740,8 @@ ParseResult RuleContainer::match(ParserContext &s) const {
     Soul::ParserContext &c = s;
     uint on = c.operation_number + 1;
     ParseResult r(false);
-//     if (rule && rule->get_flatten()) saved_ast = c.remove_ast();
-    
+    //     if (rule && rule->get_flatten()) saved_ast = c.remove_ast();
+
     if (debug) {
         c.level++;
         c.operation_number++;
@@ -744,14 +814,14 @@ ParseResult RuleImpl::match(ParserContext &s) const {
 
 /** Parse */
 ParseResult RuleImpl::parse(ParserContext &s) const {
-//         ParserContext &c = s;
-//            std::cerr << std::string(c.level++,' ') << " \\ " << typeid(*this).name() << " ";
-//            s.print_context(std::cerr,s.get_scanner().get_pos());
-//            std::cerr << std::endl;
+    //         ParserContext &c = s;
+    //            std::cerr << std::string(c.level++,' ') << " \\ " << typeid(*this).name() << " ";
+    //            s.print_context(std::cerr,s.get_scanner().get_pos());
+    //            std::cerr << std::endl;
 
     ParseResult r = match(s);
-//         c.level--;
-//         std::cerr << std::string(c.level,' ') << " " << (r ? "/ " : "# " ) << typeid(*this).name() << std::endl;
+    //         c.level--;
+    //         std::cerr << std::string(c.level,' ') << " " << (r ? "/ " : "# " ) << typeid(*this).name() << std::endl;
     return r;
 };
 
@@ -913,7 +983,7 @@ void ASTScanner::print_context(std::ostream &out, Scanner::Iterator begin, size_
     size_t n = 0;
     for(; !at_end(i) && (size == 0 || n < size); i = get_next(i), n++)
         out  << i.get_token().get_name() << (i.node && i.node->is_root() && i.state == Position::normal ? "^" : "")
-//                     << ", " << i.node << ", " << i.state << ", " << (i.node ?  i.node->parent : 0) << "\n"
+        //                     << ", " << i.node << ", " << i.state << ", " << (i.node ?  i.node->parent : 0) << "\n"
         << " ";
     if (i.node != 0)
         out << "...";
@@ -1096,7 +1166,7 @@ namespace {
 //     // Build ourselves
 //     SmartPointer<AST> selftree(new AST(r));
 //     selftree->content = content;
-// 
+//
 //     if (root_node) {
 //         selftree->add_as_last_child(saved_tree);
 //         c.ast = selftree;
@@ -1122,14 +1192,17 @@ class AST_MakeRoot : public ParserContext::ASTAction {
 public:
     void run(ParserContext::ASTAction::Context &c) {
         // The current generated AST tree must be a token
-        if (c.stack.empty()) throw std::logic_error("The AST stack is empty (make root)");
+        if (c.stack.empty())
+            throw std::logic_error("The AST stack is empty (make root)");
         AST *node = c.stack.top().get();
         if (!node || node->next || node->first_child) {
             throw std::logic_error("Trying to make a non-token the root of an AST tree");
         }
         node->state = AST::ACTIVE;
-    }        
-    virtual void print(std::ostream &out) const { out << "Make root"; }
+    }
+    virtual void print(std::ostream &out) const {
+        out << "Make root";
+    }
 };
 
 class MakeRoot: public UnaryOperator {
@@ -1168,22 +1241,23 @@ struct Token_c : public UnaryOperator {
         ParseResult r = rule.parse(s);
         Scanner::Iterator end = s.get_scanner().get_pos();
         s.do_generate_AST(b);
-        
+
         if (r) {
             std::ostringstream out;
             s.get_scanner().print_context(out,begin,end);
             SmartPointer<AST> node = new AST(token);
             node->content = out.str();
-            if (root_node) node->state = AST::ACTIVE;
+            if (root_node)
+                node->state = AST::ACTIVE;
             s.m_actions.push_back(new AST_Add(node));
-        } 
+        }
 
         return r;
     }
 };
 
 Token::Token(const std::string &_name) : name(_name) {
-//     std::cerr << "Creating token " << _name << std::endl;
+    //     std::cerr << "Creating token " << _name << std::endl;
 }
 Token::~Token() {}
 Rule Token::operator()() const {
