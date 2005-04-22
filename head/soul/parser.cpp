@@ -369,6 +369,7 @@ struct True_p : public RuleImpl {
 };
 
 
+
 Rule digit(new Digit());
 Rule digit_p(new Digit());
 Rule xdigit_p(new XDigit());
@@ -399,6 +400,25 @@ Rule Epsilon_p::operator()(const Rule &x) {
 
 Epsilon_p epsilon_p;
 
+
+// -----*----- Not_p
+
+struct _Not_p : public UnaryOperator {
+    public:
+        _Not_p(const Rule &_rule) : UnaryOperator(_rule) {}
+        ParseResult match(ParserContext &s) const {
+            Scanner::Iterator start = s.get_scanner().get_pos();
+            ParseResult r = rule.parse(s);
+            s.get_scanner().move(start);
+            return !r;
+        }
+};
+
+Rule Not_p::operator()(const Rule &x) {
+    return Rule(new _Not_p(x));
+}
+
+Not_p not_p;
 
 // ------------------------------------ If then else parser
 

@@ -420,6 +420,7 @@ extern Rule anychar_p;
 /** A parser that is always true and do not consume input */
 extern Rule true_p;
 
+
 Rule operator>>(char, const Rule &);
 Rule operator>>(const std::string &, const Rule &);
 
@@ -472,6 +473,11 @@ struct Epsilon_p {
 extern Epsilon_p epsilon_p;
 
 
+struct Not_p {
+    Rule operator()(const Rule &);
+};
+/** A parser that match everything else */
+extern Not_p not_p;
 
 // ---- if / then / else ----
 
