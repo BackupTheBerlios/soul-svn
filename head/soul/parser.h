@@ -40,31 +40,53 @@ class ParserContext;
 
 /** An AST tree */
 struct AST {
+    /** Print the AST Tree */
     void print(std::ostream &, bool dot_format);
+    /** Print the AST tree with indentation */
     void print(std::ostream &, bool dot_format, uint level);
 
-    SmartPointer<AST> next, first_child;
+    /** Next sibling element in the AST */
+    SmartPointer<AST> next;
+
+    /** First child of this element in the AST */
+    SmartPointer<AST> first_child;
+
+    /** The associated token */
     const Token &token;
+
+    /** A string with content of this node */
     std::string content;
+
+    /** The parent (used for navigational purposes) */
     mutable AST *parent;
 
-    /** Node state: root node, active root node or normal */
+    /**
+     * Node state: root node, active root node or normal
+     * The node is ROOT when it has (or may have) descendants
+     * The node is ACTIVE when it is root and when any new AST node is added to its children
+     * The node is NORMAL otherwise
+     */
     enum { NORMAL = 1, ROOT = 2, ACTIVE=4 } state;
 
+    /** Return true if the node is root */
     inline bool is_root() const {
         return state & (ROOT | ACTIVE);
     }
+
+    /** Return true if this node is active */
     inline bool is_active() const {
         return state & ACTIVE;
     }
 
+    /** Construct an AST Node from a token */
     AST(const Token&);
 
+    /** Set the parent of this AST node */
     void set_parent(AST*) const;
 
     /**
      * Replace this AST node with another one
-     * @param x 
+     * @param x
      */
     inline void replace(SmartPointer<AST> &x) {
         AST *i = x.get();
@@ -138,6 +160,9 @@ typedef SmartPointer<ScannerIteratorImpl> ScannerIterator;
 struct ParseResult {
     bool hit;
 
+    /**
+     * Return true if the result is positive
+     */
     inline operator bool() const {
         return hit;
     }
@@ -145,15 +170,18 @@ struct ParseResult {
 
     /**
      * Add a new result at the end of this one (AST, ...)
-     * @param r 
+     * @param r
      * @return true if both parse results have a hit
      */
     ParseResult& update(const ParseResult &r);
 };
 
+
+class GlobalSemanticContext;
+
 /**
  * Rule semantic context
- * The semantic contexts can be created by rules and can be accessed by subrules and the last ancestor 
+ * The semantic contexts can be created by rules and can be accessed by subrules and the last ancestor
  * rule that created a context
  */
 struct SemanticContext {
@@ -163,23 +191,23 @@ struct SemanticContext {
     /**
      * Called when the context is closed (but before it is destroyed)
      */
-    virtual void finish();
+    virtual void finish(GlobalSemanticContext &context);
 
     typedef void (*Function)(SemanticContext&);
     typedef SemanticContext * (*Constructor)();
 
     typedef std::stack<SmartPointer<SemanticContext> > SemanticContextStack;
-    
+
     class Stack : public  SemanticContextStack {
         SmartPointer<SemanticContext> last;
     public:
         SmartPointer<SemanticContext> get_last();
-        SmartPointer<SemanticContext> pop();
+        SmartPointer<SemanticContext> pop(GlobalSemanticContext &);
     };
 };
 
-/** 
- * Global context for actions 
+/**
+ * Global context for actions
  * An instance of this object is the only parameter given to actions
  */
 class GlobalSemanticContext {
@@ -187,19 +215,38 @@ class GlobalSemanticContext {
     SemanticContext::Stack stack;
 public:
     virtual ~GlobalSemanticContext();
-    template <class T> T& current() {
-        if (stack.empty()) throw std::runtime_error("Stack of context is empty");
-        return dynamic_cast<T&>(*stack.top());
+    template <class T>
+    T& current() {
+        if (stack.empty())
+            throw std::runtime_error("Stack of context is empty");
+        try {
+            return dynamic_cast<T&>(*stack.top());
+        } catch(...) {
+            throw std::runtime_error(std::string("Impossible to convert ") + typeid(*stack.top()).name() + " in " + DEMANGLE(T));
+        }
     }
-    template <class T> T& last() {
-        if (stack.get_last()) return dynamic_cast<T&>(*stack.get_last());
+    template <class T>
+    T& last() {
+        try {
+            if (stack.get_last())
+                return dynamic_cast<T&>(*stack.get_last());
+        } catch(...) {
+            throw std::runtime_error(std::string("Impossible to convert ") + typeid(*stack.get_last()).name() + " in " + DEMANGLE(T));
+        }
         throw std::runtime_error("There is no last context");
     }
-    inline SmartPointer<SemanticContext>  get_last() { return stack.get_last(); }
-    inline SemanticContext::Stack &getStack() { return stack; }
-    
+    inline SmartPointer<SemanticContext>  getLast() {
+        return stack.get_last();
+    }
+    inline SmartPointer<SemanticContext>  getCurrent() {
+        return stack.top();
+    }
+    inline SemanticContext::Stack &getStack() {
+        return stack;
+    }
+
     typedef void (*Function)(GlobalSemanticContext &);
-    
+
 };
 
 
@@ -219,9 +266,10 @@ struct Information : public SemanticContext {
     Token(const std::string &_name);
     virtual ~Token();
     std::string get_name() const;
-    Rule operator[](const Rule &) const;
+    Rule operator[](GlobalSemanticContext::Function f) const;
 
     Rule operator()() const;
+    Rule operator()(const Rule &) const;
 
     Rule operator^(const Rule &) const;
     inline bool operator==(const Token &other) const {
@@ -294,7 +342,7 @@ public:
     enum Way { WAY_IN, WAY_OUT, WAY_ERROR };
     template <typename T>
     Rule(ParseResult  (*f)(Rule::Way, T &)) : rule(new ContextRule<T>(f)) {}
-    
+
     Rule(GlobalSemanticContext::Function f);
     //@}
 
@@ -336,7 +384,7 @@ public:
     Rule operator[](void (*f)(T &, U &)) {
         return Rule(new SemanticContextInterfaceRule<T,U>(*this,f));
     }
-    
+
     /** Context operator */
     Rule operator[](GlobalSemanticContext::Function);
 
@@ -662,8 +710,8 @@ public:
      * Add the action associated with rule r
      * The current tree becomes the child of rule r
      * The rule r is added to the action tree t
-     * @param r 
-     * @param t 
+     * @param r
+     * @param t
      */
     void add_action(const SemanticFunction &r, const SmartPointer<SemanticContext> &c, const ActionTree &t);
 
@@ -709,7 +757,7 @@ class ASTScanner : public Scanner {
     Position get_next(const Position &) const;
 public:
     /**
-     * tree_start and tree_end are imaginary tokens that help delimiting the tree 
+     * tree_start and tree_end are imaginary tokens that help delimiting the tree
      * and are generated by the scanner
      */
     static const Token tree_start, tree_end;
@@ -766,7 +814,7 @@ public:
     };
 
     virtual Iterator get_pos() const {
-        return new Iterator_t(position);
+        return Iterator(new Iterator_t(position));
     }
 
     virtual void move(const Iterator &i) {
@@ -832,9 +880,9 @@ struct SemanticContextInterfaceRule : public UnaryOperator, public SemanticFunct
             function(dynamic_cast<T&>(*stack.top()), dynamic_cast<U&>(*stack.get_last()));
         } catch (const std::bad_cast &) {
             if (dynamic_cast<T*>(stack.top().get()) == 0)
-                std::cerr << "Bad cast: can't convert " << typeid(stack.top().get()).name() <<" to " << typeid(T*).name() << std::endl;
+                std::cerr << "Bad cast: can't convert " << typeid(stack.top().get()).name() <<" to " << DEMANGLE(T*) << std::endl;
             if (dynamic_cast<U*>(stack.get_last().get()) == 0)
-                std::cerr << "Bad cast: can't convert " << typeid(stack.get_last().get()).name() <<" to " << typeid(U*).name() << std::endl;
+                std::cerr << "Bad cast: can't convert " << typeid(stack.get_last().get()).name() <<" to " << DEMANGLE(U*) << std::endl;
             throw;
         }
     }
@@ -863,9 +911,9 @@ struct SemanticContextRule : public UnaryOperator, public SemanticFunction {
 
 /**
  * Add a semantic function in the processing stream
- * @param r 
- * @param (* f)( T & ) 
- * @return 
+ * @param r
+ * @param (* f)( T & )
+ * @return
  */
 template<class T>
 Rule operator<<(const Rule &r, void (*f)(T &)) {
@@ -897,7 +945,8 @@ struct ContextRule : public RuleImpl {
                 function(Rule::WAY_ERROR,dynamic_cast<T&>(s));
             return r;
         } catch(...) {
-            std::cerr << "Error (type of s is " << typeid(s).name() << ")" << std::endl;
+            std::cerr << "Error (type of s is " << DEMANGLE(s) << ")" << std::endl;
+            throw;
         }
     }
 

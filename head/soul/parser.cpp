@@ -218,7 +218,7 @@ struct Alternative : public BinaryOperator {
                     s.get_scanner().move(left_pos);
                     return a;
                 }
-                size_t right_N = s.m_actions.size();
+//                 size_t right_N = s.m_actions.size();
 
                 // both are hits
                 ParseResult *c = &b;
@@ -313,7 +313,7 @@ struct Token_p : public RuleImpl, public SemanticFunction {
         bool r = (info.token == token);
         //         std::cerr << "COMPARING " <<  info.token.get_name() << " (" << &info.token << ") AND " << token.get_name() << " (" << &token << ") => " << r << std::endl;
         if (r)
-            s.add_action(*this, new Token::Information(token, info.text));
+            s.add_action(*this, SmartPointer<SemanticContext>(new Token::Information(token, info.text)));
         return ParseResult(r);
     }
 
@@ -322,7 +322,7 @@ struct Token_p : public RuleImpl, public SemanticFunction {
     }
 
     virtual void cleanup(GlobalSemanticContext &context) const {
-        context.getStack().pop();
+        context.getStack().pop(context);
     }
 
 };
@@ -418,6 +418,7 @@ Rule Not_p::operator()(const Rule &x) {
     return Rule(new _Not_p(x));
 }
 
+
 Not_p not_p;
 
 // ------------------------------------ If then else parser
@@ -466,8 +467,8 @@ If_p if_p;
 
 struct _ContextRule : public RuleImpl, public SemanticFunction {
     
-    GlobalSemanticContext::Function function;
     Rule rule;
+    GlobalSemanticContext::Function function;
     
     _ContextRule(GlobalSemanticContext::Function f) : function(f) {}
     _ContextRule(const Rule &_rule, GlobalSemanticContext::Function f) : rule(_rule), function(f) {}
@@ -615,7 +616,7 @@ SmartPointer<ParserContext::ActionTree::Node> ParserContext::add_action(const Se
     if (!is_generating_action_tree())
         return 0;
 
-    SmartPointer<ParserContext::ActionTree::Node> node = new ActionTree::Node(r);
+    SmartPointer<ParserContext::ActionTree::Node> node(new ActionTree::Node(r));
     node->context = c;
 
     if (action_tree.last) {
@@ -658,13 +659,13 @@ void ParserContext::restore_action_tree(const ActionTree &t) {
 SmartPointer<SemanticContext> ParserContext::execute_actions(GlobalSemanticContext &context) {
     if (action_tree.root) {
         action_tree.root->execute(context);
-        return context.get_last();
+        return context.getLast();
     }
     return 0;
 }
 
 void ParserContext::ActionTree::Node::execute(GlobalSemanticContext &gc) {
-    //    std::cerr << std::string(tttt++,' ')  << "Executing action " << &rule << ", " << typeid(rule).name() << std::endl;
+//        std::cerr << std::string(/*tttt++*/3,' ')  << "Executing action " << &rule << ", " << DEMANGLE(rule) << std::endl;
     rule.execute(gc, context);
     if (first_child)
         first_child->execute(gc);
@@ -683,14 +684,16 @@ GlobalSemanticContext::~GlobalSemanticContext() {}
 // ------------------------------------ Semantic context ----------------------
 
 SemanticContext::~SemanticContext() {}
-void SemanticContext::finish() {}
+void SemanticContext::finish(GlobalSemanticContext &context) {}
 
 SmartPointer<SemanticContext> SemanticContext::Stack::get_last() {
     return last;
 }
-SmartPointer<SemanticContext> SemanticContext::Stack::pop() {
+
+
+SmartPointer<SemanticContext> SemanticContext::Stack::pop(GlobalSemanticContext &context) {
     last =  top();
-    last->finish();
+    last->finish(context);
     SemanticContextStack::pop();
     return last;
 }
@@ -709,10 +712,10 @@ struct SemanticContextConstructionRule : public UnaryOperator, public SemanticFu
         return r;
     }
     virtual void execute(GlobalSemanticContext &context, const SemanticContext::Ptr &) const {
-        context.getStack().push(constructor());
+        context.getStack().push(SmartPointer<SemanticContext>(constructor()));
     }
     virtual void cleanup(GlobalSemanticContext &context) const {
-        context.getStack().pop();
+        context.getStack().pop(context);
     }
 };
 Rule operator>>(SemanticContext::Constructor c, const Rule &r) {
@@ -835,13 +838,13 @@ ParseResult RuleImpl::match(ParserContext &s) const {
 /** Parse */
 ParseResult RuleImpl::parse(ParserContext &s) const {
     //         ParserContext &c = s;
-    //            std::cerr << std::string(c.level++,' ') << " \\ " << typeid(*this).name() << " ";
+    //            std::cerr << std::string(c.level++,' ') << " \\ " << DEMANGLE(*this) << " ";
     //            s.print_context(std::cerr,s.get_scanner().get_pos());
     //            std::cerr << std::endl;
 
     ParseResult r = match(s);
     //         c.level--;
-    //         std::cerr << std::string(c.level,' ') << " " << (r ? "/ " : "# " ) << typeid(*this).name() << std::endl;
+    //         std::cerr << std::string(c.level,' ') << " " << (r ? "/ " : "# " ) << DEMANGLE(*this) << std::endl;
     return r;
 };
 
@@ -1116,7 +1119,7 @@ void AST::set_parent(AST *p) const {
 }
 
 ParserContext::ParserContext() : generate_AST(false), generate_action_tree(true), level(0), operation_number(0)  {}
-ParserContext::ParserContext(Scanner &s) : generate_AST(false), generate_action_tree(true), level(0), operation_number(0), scanner(&s)  {}
+ParserContext::ParserContext(Scanner &s) : generate_AST(false), generate_action_tree(true), scanner(&s), level(0), operation_number(0)  {}
 
 void AST::print(std::ostream &out, bool dot_format) {
     if (dot_format)
@@ -1265,7 +1268,7 @@ struct Token_c : public UnaryOperator {
         if (r) {
             std::ostringstream out;
             s.get_scanner().print_context(out,begin,end);
-            SmartPointer<AST> node = new AST(token);
+            SmartPointer<AST> node(new AST(token));
             node->content = out.str();
             if (root_node)
                 node->state = AST::ACTIVE;
@@ -1288,7 +1291,11 @@ std::string Token::get_name() const {
     return name;
 }
 
-Rule Token::operator[](const Rule &x) const {
+Rule Token::operator[](GlobalSemanticContext::Function f) const {
+    return Rule(new _ContextRule(Rule(*this), f));
+}
+
+Rule Token::operator()(const Rule &x) const {
     return Rule(new Token_c(*this, x, false));
 }
 Rule Token::operator^(const Rule &x) const {
